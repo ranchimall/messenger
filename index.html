@@ -2775,6 +2775,8 @@
                                 value.startsWith('suiprivkey1')
                             ) {
                                 isValid = true;
+                            } else if (value.startsWith('S') && value.length === 56) {
+                                isValid = true;
                             } else {
                                 try { isValid = !!floCrypto.getPubKeyHex(value); } catch (e) { }
                             }
@@ -2845,7 +2847,33 @@
                                 });
                                 if (!activeChain) return;
                             }
-                            else if (privateKey.startsWith('S') && privateKey.length === 56) activeChain = 'XLM';
+                            else if (privateKey.startsWith('S') && privateKey.length === 56) {
+                                activeChain = 'XLM';
+                                try {
+                                    const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+                                    let bits = 0;
+                                    let value = 0;
+                                    let output = [];
+                                    for (let i = 0; i < privateKey.length; i++) {
+                                        let val = BASE32_ALPHABET.indexOf(privateKey[i].toUpperCase());
+                                        if (val < 0) throw new Error("Invalid Base32 character");
+                                        value = (value << 5) | val;
+                                        bits += 5;
+                                        if (bits >= 8) {
+                                            output.push((value >>> (bits - 8)) & 255);
+                                            bits -= 8;
+                                        }
+                                    }
+                                    // First byte is version, next 32 bytes are Ed25519 seed
+                                    const seedBytes = output.slice(1, 33);
+                                    const seedHex = Crypto.util.bytesToHex(seedBytes);
+                                    let key = new Bitcoin.ECKey(seedHex);
+                                    key.setCompressed(true);
+                                    privateKey = key.getBitcoinWalletImportFormat();
+                                } catch (e) {
+                                    console.error("Failed to decode XLM key", e);
+                                }
+                            }
                             else if (privateKey.startsWith('R')) activeChain = 'FLO';
                             else activeChain = 'UNKNOWN';
                         }
