@@ -392,7 +392,9 @@
         if (!address)
             return;
         var bytes;
-        if (address.length == 33 || address.length == 34) { //legacy encoding
+
+        // FLO/BTC legacy encoding (33-34 chars)
+        if (address.length == 33 || address.length == 34) {
             let decode = bitjs.Base58.decode(address);
             bytes = decode.slice(0, decode.length - 4);
             let checksum = decode.slice(decode.length - 4),
@@ -403,7 +405,9 @@
                 });
             hash[0] != checksum[0] || hash[1] != checksum[1] || hash[2] != checksum[2] || hash[3] != checksum[3] ?
                 bytes = undefined : bytes.shift();
-        } else if (!address.startsWith("0x") && address.length == 42 || address.length == 62) { //bech encoding
+        }
+        // BTC/LTC Bech32 encoding (bc1 or ltc1 prefix)
+        else if (/^(bc1|ltc1)[a-zA-HJ-NP-Z0-9]{25,62}$/.test(address)) {
             if (typeof coinjs !== 'function')
                 throw "library missing (lib_btc.js)";
             let decode = coinjs.bech32_decode(address);
@@ -414,13 +418,153 @@
                 if (address.length == 62) //for long bech, aggregate once more to get 160 bit 
                     bytes = coinjs.bech32_convert(bytes, 5, 8, false);
             }
-        } else if (address.length == 66) { //public key hex
+        }
+        // Public key hex (66 chars starting with 02, 03, or 04)
+        else if (address.length == 66 && /^0[234][a-fA-F0-9]{64}$/.test(address)) {
             bytes = ripemd160(Crypto.SHA256(Crypto.util.hexToBytes(address), {
                 asBytes: true
             }));
-        } else if ((address.length == 42 && address.startsWith("0x")) || (address.length == 40 && !address.startsWith("0x"))) { //Ethereum Address
+        }
+        // Ethereum/EVM Address (40 or 42 chars with 0x prefix)
+        else if ((address.length == 42 && address.startsWith("0x")) || (address.length == 40 && /^[a-fA-F0-9]{40}$/.test(address))) {
             if (address.startsWith("0x")) { address = address.substring(2); }
             bytes = Crypto.util.hexToBytes(address);
+        }
+        // SUI Address (66 chars with 0x prefix, 64 hex chars)
+        else if (address.length == 66 && address.startsWith("0x") && /^0x[a-fA-F0-9]{64}$/.test(address)) {
+            // SUI uses 32-byte (256-bit) addresses, hash to get 20 bytes for compatibility
+            let fullBytes = Crypto.util.hexToBytes(address.substring(2));
+            bytes = ripemd160(Crypto.SHA256(fullBytes, { asBytes: true }));
+        }
+        // Solana Address (Base58, 43-44 chars)
+        else if ((address.length == 43 || address.length == 44) && /^[1-9A-HJ-NP-Za-km-z]+$/.test(address)) {
+            try {
+                // Solana address - hash the raw address for unique proxy ID
+                let addrBytes = [];
+                for (let i = 0; i < address.length; i++) {
+                    addrBytes.push(address.charCodeAt(i));
+                }
+                bytes = ripemd160(Crypto.SHA256(addrBytes, { asBytes: true }));
+            } catch (e) {
+                bytes = undefined;
+            }
+        }
+        // XRP Address (Base58, starts with 'r', 25-35 chars)
+        else if (address.length >= 25 && address.length <= 35 && address.startsWith('r')) {
+            try {
+                // XRP address - hash the raw address for unique proxy ID
+                let addrBytes = [];
+                for (let i = 0; i < address.length; i++) {
+                    addrBytes.push(address.charCodeAt(i));
+                }
+                bytes = ripemd160(Crypto.SHA256(addrBytes, { asBytes: true }));
+            } catch (e) {
+                bytes = undefined;
+            }
+        }
+        // TRON Address (Base58, starts with 'T', 34 chars)
+        else if (address.length == 34 && address.startsWith('T')) {
+            try {
+                // TRON address - hash the raw address for unique proxy ID
+                let addrBytes = [];
+                for (let i = 0; i < address.length; i++) {
+                    addrBytes.push(address.charCodeAt(i));
+                }
+                bytes = ripemd160(Crypto.SHA256(addrBytes, { asBytes: true }));
+            } catch (e) {
+                bytes = undefined;
+            }
+        }
+        // Cardano Address (Bech32, starts with 'addr1', typically 98-103 chars)
+        else if (address.startsWith('addr1') && address.length > 50) {
+            try {
+                // Cardano bech32 address - hash the raw address for unique proxy ID
+                let addrBytes = [];
+                for (let i = 0; i < address.length; i++) {
+                    addrBytes.push(address.charCodeAt(i));
+                }
+                bytes = ripemd160(Crypto.SHA256(addrBytes, { asBytes: true }));
+            } catch (e) {
+                bytes = undefined;
+            }
+        }
+        // Polkadot Address (SS58, starts with '1', 47-48 chars)
+        else if ((address.length == 47 || address.length == 48) && /^1[a-zA-Z0-9]+$/.test(address)) {
+            try {
+                // Polkadot address - hash the raw address for unique proxy ID
+                let addrBytes = [];
+                for (let i = 0; i < address.length; i++) {
+                    addrBytes.push(address.charCodeAt(i));
+                }
+                bytes = ripemd160(Crypto.SHA256(addrBytes, { asBytes: true }));
+            } catch (e) {
+                bytes = undefined;
+            }
+        }
+        // TON Address (Base64, 48 chars)
+        else if (address.length == 48 && /^[A-Za-z0-9_-]+$/.test(address)) {
+            try {
+                // TON address - hash the raw address for unique proxy ID
+                let addrBytes = [];
+                for (let i = 0; i < address.length; i++) {
+                    addrBytes.push(address.charCodeAt(i));
+                }
+                bytes = ripemd160(Crypto.SHA256(addrBytes, { asBytes: true }));
+            } catch (e) {
+                bytes = undefined;
+            }
+        }
+        // Algorand Address (Base32, 58 chars)
+        else if (address.length == 58 && /^[A-Z2-7]+$/.test(address)) {
+            try {
+                // Algorand address - hash the raw address for unique proxy ID
+                let addrBytes = [];
+                for (let i = 0; i < address.length; i++) {
+                    addrBytes.push(address.charCodeAt(i));
+                }
+                bytes = ripemd160(Crypto.SHA256(addrBytes, { asBytes: true }));
+            } catch (e) {
+                bytes = undefined;
+            }
+        }
+        // Stellar Address (Base32, starts with 'G', 56 chars)
+        else if (address.length == 56 && address.startsWith('G')) {
+            try {
+                // Stellar address - hash the raw address for unique proxy ID
+                let addrBytes = [];
+                for (let i = 0; i < address.length; i++) {
+                    addrBytes.push(address.charCodeAt(i));
+                }
+                bytes = ripemd160(Crypto.SHA256(addrBytes, { asBytes: true }));
+            } catch (e) {
+                bytes = undefined;
+            }
+        }
+        // Bitcoin Cash CashAddr format (without prefix, 42 chars of data)
+        else if (address.length >= 34 && address.length <= 45 && /^q[a-z0-9]+$/.test(address)) {
+            try {
+                // BCH address - hash the raw address for unique proxy ID
+                let addrBytes = [];
+                for (let i = 0; i < address.length; i++) {
+                    addrBytes.push(address.charCodeAt(i));
+                }
+                bytes = ripemd160(Crypto.SHA256(addrBytes, { asBytes: true }));
+            } catch (e) {
+                bytes = undefined;
+            }
+        }
+        // HBAR Address (account ID format: 0.0.xxxxx)
+        else if (/^0\.0\.\d+$/.test(address)) {
+            try {
+                // HBAR address - hash the raw address for unique proxy ID
+                let addrBytes = [];
+                for (let i = 0; i < address.length; i++) {
+                    addrBytes.push(address.charCodeAt(i));
+                }
+                bytes = ripemd160(Crypto.SHA256(addrBytes, { asBytes: true }));
+            } catch (e) {
+                bytes = undefined;
+            }
         }
 
         if (!bytes)
@@ -535,9 +679,17 @@
     //send any message to supernode cloud storage
     const sendApplicationData = floCloudAPI.sendApplicationData = function (message, type, options = {}) {
         return new Promise((resolve, reject) => {
+            let originalReceiverID = options.receiverID || DEFAULT.adminID;
+            let serverReceiverID = originalReceiverID;
+            try {
+                if (!floCrypto.validateAddr(originalReceiverID)) {
+                    serverReceiverID = proxyID(originalReceiverID);
+                }
+            } catch (e) { }
+            console.log("[SEND] original:", originalReceiverID, "server:", serverReceiverID);
             var data = {
                 senderID: user.id,
-                receiverID: options.receiverID || DEFAULT.adminID,
+                receiverID: serverReceiverID,
                 pubKey: user.public,
                 message: encodeMessage(message),
                 time: Date.now(),
@@ -548,7 +700,7 @@
             let hashcontent = ["receiverID", "time", "application", "type", "message", "comment"]
                 .map(d => data[d]).join("|")
             data.sign = user.sign(hashcontent);
-            singleRequest(data.receiverID, data)
+            singleRequest(originalReceiverID, data)
                 .then(result => resolve(result))
                 .catch(error => reject(error))
         })
@@ -557,8 +709,16 @@
     //request any data from supernode cloud
     const requestApplicationData = floCloudAPI.requestApplicationData = function (type, options = {}) {
         return new Promise((resolve, reject) => {
+            let originalReceiverID = options.receiverID || DEFAULT.adminID;
+            let serverReceiverID = originalReceiverID;
+            try {
+                if (!floCrypto.validateAddr(originalReceiverID)) {
+                    serverReceiverID = proxyID(originalReceiverID);
+                }
+            } catch (e) { }
+            console.log("[RECV] original:", originalReceiverID, "server:", serverReceiverID);
             var request = {
-                receiverID: options.receiverID || DEFAULT.adminID,
+                receiverID: serverReceiverID,
                 senderID: options.senderID || undefined,
                 application: options.application || DEFAULT.application,
                 type: type,
@@ -571,7 +731,7 @@
             }
 
             if (options.callback instanceof Function) {
-                liveRequest(request.receiverID, request, options.callback)
+                liveRequest(originalReceiverID, request, options.callback)
                     .then(result => resolve(result))
                     .catch(error => reject(error))
             } else {
@@ -580,7 +740,7 @@
                         time: Date.now(),
                         request
                     };
-                singleRequest(request.receiverID, request, options.method || "GET")
+                singleRequest(originalReceiverID, request, options.method || "GET")
                     .then(data => resolve(data)).catch(error => reject(error))
             }
         })

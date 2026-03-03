@@ -299,7 +299,7 @@
                 return true;
             else
                 return false;
-        } else if (raw.type === 'ethereum') {
+        } else if (raw.type === 'ethereum' || raw.type === 'bch') {
             return true
         } else //unknown
             return false;
@@ -431,13 +431,29 @@
             } else
                 return null;
         } else if ((address.length == 42 && address.startsWith("0x")) || (address.length == 40 && !address.startsWith("0x"))) { //Ethereum Address
-           if (address.startsWith("0x")) { address = address.substring(2); }
-            let bytes = Crypto.util.hexToBytes(address); 
+            if (address.startsWith("0x")) { address = address.substring(2); }
+            let bytes = Crypto.util.hexToBytes(address);
             return {
                 version: 1,
                 hex: address,
                 type: 'ethereum',
                 bytes
+            }
+        } else if (address.length >= 34 && address.length <= 45 && /^q[a-z0-9]+$/.test(address)) { //BCH Address
+            try {
+                let addrBytes = [];
+                for (let i = 0; i < address.length; i++) {
+                    addrBytes.push(address.charCodeAt(i));
+                }
+                let payload = ripemd160(Crypto.SHA256(addrBytes, { asBytes: true }));
+                return {
+                    version: 1,
+                    hex: Crypto.util.bytesToHex(payload),
+                    type: 'bch',
+                    bytes: payload
+                }
+            } catch (e) {
+                return null;
             }
         }
     }

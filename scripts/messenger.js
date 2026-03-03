@@ -18,7 +18,8 @@
         direct: (d, e) => console.log(d, e),
         chats: (c) => console.log(c),
         mails: (m) => console.log(m),
-        marked: (r) => console.log(r)
+        marked: (r) => console.log(r),
+        onChatMigrated: (oldID, newID) => console.log(`Migrated ${oldID} to ${newID}`)
     };
     rmMessenger.renderUI = {};
     Object.defineProperties(rmMessenger.renderUI, {
@@ -39,6 +40,9 @@
         },
         marked: {
             set: ui_fn => UI.marked = ui_fn
+        },
+        onChatMigrated: {
+            set: ui_fn => UI.onChatMigrated = ui_fn
         }
     });
 
@@ -74,13 +78,58 @@
         }
     });
 
+    // Validate any blockchain address (all 19 supported chains)
+    function isValidBlockchainAddress(address) {
+        if (!address || typeof address !== 'string') return false;
+
+        // FLO/BTC/DOGE/LTC legacy (Base58, 33-34 chars)
+        if ((address.length === 33 || address.length === 34) && /^[1-9A-HJ-NP-Za-km-z]+$/.test(address)) {
+            return floCrypto.validateAddr(address) || true;
+        }
+        // Ethereum/EVM addresses (0x prefix, 40 hex chars) - ETH, AVAX, BSC, MATIC, ARB, OP
+        if (/^0x[a-fA-F0-9]{40}$/.test(address)) return true;
+        // SUI addresses (0x prefix, 64 hex chars)
+        if (/^0x[a-fA-F0-9]{64}$/.test(address)) return true;
+        // BTC/LTC Bech32 (bc1/ltc1 prefix)
+        if (/^(bc1|ltc1)[a-zA-HJ-NP-Z0-9]{25,62}$/.test(address)) return true;
+        // Solana (Base58, 43-44 chars)
+        if ((address.length === 43 || address.length === 44) && /^[1-9A-HJ-NP-Za-km-z]+$/.test(address)) return true;
+        // XRP (r-prefix, 25-35 chars)
+        if (address.startsWith('r') && address.length >= 25 && address.length <= 35 && /^r[a-zA-Z0-9]+$/.test(address)) return true;
+        // TRON (T-prefix, 34 chars)
+        if (address.startsWith('T') && address.length === 34 && /^T[a-zA-Z0-9]+$/.test(address)) return true;
+        // Cardano (addr1 prefix, Bech32)
+        if (address.startsWith('addr1') && address.length > 50) return true;
+        // Polkadot (SS58, starts with 1, 47-48 chars)
+        if (address.startsWith('1') && (address.length === 47 || address.length === 48) && /^[a-zA-Z0-9]+$/.test(address)) return true;
+        // TON (Base64 URL-safe, 48 chars)
+        if (address.length === 48 && /^[A-Za-z0-9_-]+$/.test(address)) return true;
+        // Algorand (Base32, 58 chars, uppercase + 2-7)
+        if (address.length === 58 && /^[A-Z2-7]+$/.test(address)) return true;
+        // Stellar (G-prefix, Base32, 56 chars)
+        if (address.startsWith('G') && address.length === 56 && /^G[A-Z2-7]+$/.test(address)) return true;
+        // Bitcoin Cash CashAddr (q-prefix)
+        if (address.startsWith('q') && address.length >= 34 && address.length <= 45 && /^q[a-z0-9]+$/.test(address)) return true;
+        // HBAR (0.0.xxxxx format)
+        if (/^0\.0\.\d+$/.test(address)) return true;
+
+        return false;
+    }
+
     function sendRaw(message, recipient, type, encrypt = null, comment = undefined) {
         return new Promise((resolve, reject) => {
-            if (!floCrypto.validateAddr(recipient))
+            if (!isValidBlockchainAddress(recipient))
                 return reject("Invalid Recipient");
 
             if ([true, null].includes(encrypt)) {
-                let r_pubKey = floDapps.user.get_pubKey(recipient);
+                // Try to get pubKey safely (may fail for non-FLO addresses)
+                let r_pubKey = null;
+                try {
+                    r_pubKey = floDapps.user.get_pubKey(recipient);
+                } catch (e) {
+                    // Address format not supported by floCrypto.decodeAddr
+                    r_pubKey = floGlobals.pubKeys ? floGlobals.pubKeys[recipient] : null;
+                }
                 if (r_pubKey)
                     message = floCrypto.encryptData(message, r_pubKey);
                 else if (encrypt === true)
@@ -89,8 +138,46 @@
             let options = {
                 receiverID: recipient,
             }
-            if (comment)
-                options.comment = comment
+            if (comment) {
+                options.comment = comment;
+            }
+
+            // If we're logged in with an alt chain, embed it in the comment for migration mapping
+            try {
+                let activeChain = localStorage.getItem(`${floGlobals.application}#activeChain`);
+                if (activeChain && activeChain !== 'FLO') {
+                    let proxyID = null;
+                    switch (activeChain) {
+                        case 'ETH':
+                        case 'AVAX':
+                        case 'BSC':
+                        case 'MATIC':
+                        case 'ARB':
+                        case 'OP':
+                        case 'HBAR':
+                            proxyID = floEthereum.ethAddressFromCompressedPublicKey(user.public); break;
+                        case 'BTC': proxyID = floGlobals.myBtcID; break;
+                        case 'BCH': proxyID = floGlobals.myBchID; break;
+                        case 'XRP': proxyID = floGlobals.myXrpID; break;
+                        case 'SUI': proxyID = floGlobals.mySuiID; break;
+                        case 'TON': proxyID = floGlobals.myTonID; break;
+                        case 'TRON': proxyID = floGlobals.myTronID; break;
+                        case 'DOGE': proxyID = floGlobals.myDogeID; break;
+                        case 'LTC': proxyID = floGlobals.myLtcID; break;
+                        case 'DOT': proxyID = floGlobals.myDotID; break;
+                        case 'ALGO': proxyID = floGlobals.myAlgoID; break;
+                        case 'XLM': proxyID = floGlobals.myXlmID; break;
+                        case 'SOL': proxyID = floGlobals.mySolID; break;
+                        case 'ADA': proxyID = floGlobals.myAdaID; break;
+                    }
+                    if (proxyID && proxyID !== user.id) {
+                        options.comment = (options.comment ? options.comment + "|" : "") + "FROM_ALT:" + proxyID;
+                    }
+                }
+            } catch (e) {
+                console.warn("Could not append FROM_ALT tag", e);
+            }
+
             floCloudAPI.sendApplicationData(message, type, options)
                 .then(result => resolve(result))
                 .catch(error => reject(error))
@@ -316,7 +403,7 @@
 
     const processData = {};
     processData.direct = function () {
-        return (unparsed, newInbox) => {
+        return async (unparsed, newInbox) => {
             //store the pubKey if not stored already
             floDapps.storePubKey(unparsed.senderID, unparsed.pubKey);
             if (_loaded.blocked.has(unparsed.senderID) && unparsed.type !== "REVOKE_KEY")
@@ -326,6 +413,51 @@
             let vc = unparsed.vectorClock;
             switch (unparsed.type) {
                 case "MESSAGE": { //process as message
+                    let vc = unparsed.vectorClock;
+
+                    // Chat Migration Logic
+                    if (unparsed.comment && unparsed.comment.includes("FROM_ALT:")) {
+                        let altID = unparsed.comment.split("FROM_ALT:")[1].split("|")[0]; // Extract the alt ID
+                        if (altID && altID !== unparsed.senderID) {
+                            // Check if an existing chat with this alt ID exists
+                            if (_loaded.chats[altID] !== undefined) {
+                                console.log(`Migrating chat history from ${altID} to ${unparsed.senderID}`);
+
+                                // Run migration asynchronously but wait for it to complete
+                                try {
+                                    // Migrate Messages
+                                    let _options = { lowerKey: `${altID}|`, upperKey: `${altID}||` };
+                                    let result = await compactIDB.searchData("messages", _options);
+                                    for (let i in result) {
+                                        let messageData = result[i];
+                                        messageData.floID = unparsed.senderID;
+                                        let oldVc = i.split("|")[1];
+                                        await compactIDB.addData("messages", messageData, `${unparsed.senderID}|${oldVc}`).catch(e => console.warn(e));
+                                        await compactIDB.removeData("messages", i);
+                                    }
+
+                                    // Migrate Contacts
+                                    if (floGlobals.contacts[altID]) {
+                                        let contactName = floGlobals.contacts[altID];
+                                        floDapps.storeContact(unparsed.senderID, contactName);
+                                        await compactIDB.removeData("contacts", altID, floDapps.user.db_name);
+                                        delete floGlobals.contacts[altID];
+                                    }
+
+                                    // Delete old chat reference
+                                    delete _loaded.chats[altID];
+                                    await compactIDB.removeData("chats", altID);
+
+                                    // Trigger UI update if available
+                                    if (UI.onChatMigrated) UI.onChatMigrated(altID, unparsed.senderID);
+                                    if (UI.chats) await UI.chats(getChatOrder());
+                                } catch (error) {
+                                    console.error("Migration failed:", error);
+                                }
+                            }
+                        }
+                    }
+
                     let dm = {
                         time: unparsed.time,
                         floID: unparsed.senderID,
@@ -333,7 +465,12 @@
                         message: encrypt(unparsed.message)
                     }
                     console.debug(dm, `${dm.floID}|${vc}`);
-                    compactIDB.addData("messages", Object.assign({}, dm), `${dm.floID}|${vc}`)
+                    try {
+                        await compactIDB.addData("messages", Object.assign({}, dm), `${dm.floID}|${vc}`);
+                    } catch (e) {
+                        console.warn("Message already exists (skipping UI push):", e);
+                        break; // Deduplicate: don't push to UI if we already processed it (e.g. self-messaging)
+                    }
                     _loaded.chats[dm.floID] = parseInt(vc)
                     compactIDB.writeData("chats", parseInt(vc), dm.floID)
                     dm.message = unparsed.message;
@@ -431,13 +568,13 @@
         }
     }
 
-    function requestDirectInbox() {
+    const requestDirectInbox = rmMessenger.reconnectInbox = function () {
         if (directConnID.length) { //close existing request connection (if any)
             directConnID.forEach(id => floCloudAPI.closeRequest(id));
             directConnID = [];
         }
         const parseData = processData.direct();
-        let callbackFn = function (dataSet, error) {
+        let callbackFn = async function (dataSet, error) {
             if (error)
                 return console.error(error)
             let newInbox = {
@@ -449,9 +586,11 @@
                 keyrevoke: [],
                 pipeline: {}
             }
-            for (let vc in dataSet) {
+            // Await processing in order according to vector clocks
+            let sortedVCs = Object.keys(dataSet).sort((a, b) => parseInt(a) - parseInt(b));
+            for (let vc of sortedVCs) {
                 try {
-                    parseData(dataSet[vc], newInbox);
+                    await parseData(dataSet[vc], newInbox);
                 } catch (error) {
                     //if (error !== "blocked-user")
                     console.log(error);
@@ -464,19 +603,83 @@
             console.debug(newInbox);
             UI.direct(newInbox)
         }
-        return new Promise((resolve, reject) => {
-            const promises = [
+        return new Promise(async (resolve, reject) => {
+            // All blockchain address IDs to listen on
+            let activeChain = localStorage.getItem(`${floGlobals.application}#activeChain`);
+            const blockchainAddressIDs = [floGlobals.myFloID || user.id]; // Always listen to FLO address (primary)
+
+            if (!activeChain) {
+                try {
+                    let privKey = floDapps.user.private;
+                    if (privKey instanceof Promise) privKey = await privKey;
+                    if (typeof privKey === 'string' && privKey.length > 0) {
+                        if (privKey.startsWith('suiprivkey1')) activeChain = 'SUI';
+                        else if (privKey.startsWith('s')) activeChain = 'XRP';
+                        else if (privKey.startsWith('Q') || privKey.startsWith('6')) activeChain = 'DOGE';
+                        else if (privKey.startsWith('T') && privKey.length === 51) activeChain = 'LTC';
+                        else if (privKey.startsWith('K') || privKey.startsWith('L') || privKey.startsWith('5')) activeChain = 'BTC';
+                        else if (privKey.startsWith('S') && privateKey.length === 56) activeChain = 'XLM';
+                        else if (privKey.startsWith('R') || privKey.startsWith('c') || privKey.startsWith('p')) activeChain = 'FLO';
+                    }
+                } catch (e) {
+                    console.warn("Could not deduce fallback activeChain", e);
+                }
+            }
+
+            if (activeChain) {
+                const addIfValid = (id) => { if (id && !blockchainAddressIDs.includes(id)) blockchainAddressIDs.push(id) };
+
+                switch (activeChain) {
+                    case 'ETH':
+                    case 'AVAX':
+                    case 'BSC':
+                    case 'MATIC':
+                    case 'ARB':
+                    case 'OP':
+                    case 'HBAR':
+                        addIfValid(floEthereum.ethAddressFromCompressedPublicKey(user.public));
+                        break;
+                    case 'BTC': addIfValid(floGlobals.myBtcID); break;
+                    case 'BCH': addIfValid(floGlobals.myBchID); break;
+                    case 'XRP': addIfValid(floGlobals.myXrpID); break;
+                    case 'SUI': addIfValid(floGlobals.mySuiID); break;
+                    case 'TON': addIfValid(floGlobals.myTonID); break;
+                    case 'TRON': addIfValid(floGlobals.myTronID); break;
+                    case 'DOGE': addIfValid(floGlobals.myDogeID); break;
+                    case 'LTC': addIfValid(floGlobals.myLtcID); break;
+                    case 'DOT': addIfValid(floGlobals.myDotID); break;
+                    case 'ALGO': addIfValid(floGlobals.myAlgoID); break;
+                    case 'XLM': addIfValid(floGlobals.myXlmID); break;
+                    case 'SOL': addIfValid(floGlobals.mySolID); break;
+                    case 'ADA': addIfValid(floGlobals.myAdaID); break;
+                    case 'FLO': break;
+                }
+            } else {
+                // Fallback: listen to all derived addresses if no active chain is set
+                const allDerived = [
+                    floEthereum.ethAddressFromCompressedPublicKey(user.public),
+                    floGlobals.myBtcID, floGlobals.myAvaxID, floGlobals.myBscID,
+                    floGlobals.myMaticID, floGlobals.myArbID, floGlobals.myOpID,
+                    floGlobals.myHbarID, floGlobals.myXrpID,
+                    floGlobals.mySuiID, floGlobals.myTonID, floGlobals.myTronID,
+                    floGlobals.myDogeID, floGlobals.myLtcID, floGlobals.myBchID,
+                    floGlobals.myDotID, floGlobals.myAlgoID, floGlobals.myXlmID,
+                    floGlobals.mySolID, floGlobals.myAdaID
+                ];
+                allDerived.forEach(id => {
+                    if (id && !blockchainAddressIDs.includes(id)) {
+                        blockchainAddressIDs.push(id);
+                    }
+                });
+            }
+
+            const promises = blockchainAddressIDs.map(receiverID =>
                 floCloudAPI.requestApplicationData(null, {
-                    receiverID: user.id,
-                    lowerVectorClock: _loaded.appendix.lastReceived + 1,
-                    callback: callbackFn
-                }),
-                floCloudAPI.requestApplicationData(null, {
-                    receiverID: floEthereum.ethAddressFromCompressedPublicKey(user.public),
+                    receiverID: receiverID,
                     lowerVectorClock: _loaded.appendix.lastReceived + 1,
                     callback: callbackFn
                 })
-            ]
+            );
             Promise.all(promises).then(connectionIds => {
                 directConnID = [...directConnID, ...connectionIds];
                 resolve("Direct Inbox connected");
@@ -513,7 +716,17 @@
     }
 
     rmMessenger.storeContact = function (floID, name) {
-        return floDapps.storeContact(floID, name)
+        // For FLO/BTC addresses, use the standard validation
+        if (floCrypto.validateAddr(floID)) {
+            return floDapps.storeContact(floID, name);
+        }
+        // For other blockchain addresses (ETH, SOL, ADA, etc.), store directly
+        return new Promise((resolve, reject) => {
+            compactIDB.writeData("contacts", name, floID, floDapps.user.db_name).then(result => {
+                floGlobals.contacts[floID] = name;
+                resolve("Contact stored");
+            }).catch(error => reject(error));
+        });
     }
 
     const loadDataFromIDB = function (defaultList = true) {

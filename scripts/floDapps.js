@@ -30,12 +30,17 @@
         }
     }
 
-    var user_id, user_public, user_private;
+    var user_id, user_public, user_private, user_loginID;
     const user = floDapps.user = {
         get id() {
             if (!user_id)
                 throw "User not logged in";
             return user_id;
+        },
+        get loginID() {
+            if (!user_loginID)
+                return user_id; // Default to FLO ID if not set
+            return user_loginID;
         },
         get public() {
             if (!user_public)
@@ -97,7 +102,7 @@
             }
         },
         clear() {
-            user_id = user_public = user_private = undefined;
+            user_id = user_public = user_private = user_loginID = undefined;
             user_priv_raw = aes_key = undefined;
             delete user.contacts;
             delete user.pubKeys;
@@ -450,8 +455,80 @@
                     try {
                         user_public = floCrypto.getPubKeyHex(privKey);
                         user_id = floCrypto.getAddress(privKey);
-                        if (startUpOptions.cloud)
-                            floCloudAPI.user(user_id, privKey); //Set user for floCloudAPI
+
+                        // Derive Login ID based on Private Key Type
+                        try {
+                            if (privKey.length === 64) { // Hex Key -> Ethereum
+                                if (typeof floEthereum !== 'undefined' && floEthereum.ethAddressFromPrivateKey) {
+                                    user_loginID = floEthereum.ethAddressFromPrivateKey(privKey);
+                                }
+                            } else { // WIF Key
+                                let decode = bitjs.Base58.decode(privKey);
+                                let version = decode[0];
+                                switch (version) {
+                                    case 128: // BTC (Mainnet WIF)
+                                    case 0: // BTC (Address Version - fallback)
+                                        if (typeof btcOperator !== 'undefined')
+                                            user_loginID = new Bitcoin.ECKey(privKey).getBitcoinAddress();
+                                        break;
+                                    case 176: // LTC (Mainnet WIF)
+                                    case 48: // LTC (Address Version - fallback)
+                                        if (typeof convertWIFtoLitecoinAddress === 'function')
+                                            user_loginID = convertWIFtoLitecoinAddress(privKey);
+                                        break;
+                                    case 163: // FLO (Mainnet WIF 0xA3)
+                                    case 35: // FLO (Address Version)
+                                        user_loginID = user_id;
+                                        break;
+                                    case 158: // DOGE (Mainnet WIF 0x9E)
+                                    case 30: // DOGE (Address Version) 
+                                        if (typeof convertWIFtoDogeAddress === 'function')
+                                            user_loginID = convertWIFtoDogeAddress(privKey);
+                                        break;
+                                }
+                                // Manual overrides/checks for keys that might not match standard WIF versions or rely on library detection
+                                if (!user_loginID) {
+                                    // Try XRP
+                                    if (typeof convertWIFtoXrpAddress === 'function') {
+                                        let xrpAddr = convertWIFtoXrpAddress(privKey);
+                                        if (xrpAddr) user_loginID = xrpAddr;
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error("Login ID derivation failed:", e);
+                        }
+                        if (!user_loginID) user_loginID = user_id; // Fallback
+
+                        if (startUpOptions.cloud) {
+                            // Ensure we pass a format floCloudAPI/floCrypto accepts.
+                            // For DOGE/LTC WIFs, Bitcoin.ECKey might reject the version byte if gloabls aren't set.
+                            // safer to pass RAW HEX Private Key to floCloudAPI.
+                            let cloudPrivKey = privKey;
+                            try {
+                                if (privKey.length > 50 && typeof bitjs !== 'undefined') { // valid WIF length check
+                                    let decode = bitjs.Base58.decode(privKey);
+                                    if (decode && decode.length) {
+                                        // Remove 4-byte checksum
+                                        let raw = decode.slice(0, decode.length - 4);
+                                        // Remove 1-byte Version
+                                        raw.shift();
+                                        // Check compression flag (last byte 0x01) if length is 33
+                                        if (raw.length === 33 && raw[32] === 1) {
+                                            raw.pop();
+                                        }
+                                        // Convert to Hex
+                                        if (raw.length === 32)
+                                            cloudPrivKey = Crypto.util.bytesToHex(raw);
+                                    }
+                                }
+                            } catch (e) {
+                                console.warn("WIF decode for cloud failed, using original:", e);
+                            }
+                            floCloudAPI.user(user_loginID, cloudPrivKey);
+                        }
+
+
                         user_priv_wrap = () => checkIfPinRequired(key);
                         let n = floCrypto.randInt(12, 20);
                         aes_key = floCrypto.randString(n);
