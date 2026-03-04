@@ -78,37 +78,62 @@
                     document.body.prepend(document.createElement('adblocker-warning'))
                     return
                 }
-                floGlobals.myFloID = floCrypto.getFloID(floDapps.user.public);
-                floGlobals.myBtcID = btcOperator.convert.legacy2bech(floGlobals.myFloID)
-                floGlobals.myEthID = floEthereum.ethAddressFromCompressedPublicKey(floDapps.user.public)
-                // AVAX C-Chain uses same address format as Ethereum
-                floGlobals.myAvaxID = floGlobals.myEthID;
-                // BSC (Binance Smart Chain) uses same address format as Ethereum
-                floGlobals.myBscID = floGlobals.myEthID;
-                // MATIC (Polygon) uses same address format as Ethereum
-                floGlobals.myMaticID = floGlobals.myEthID;
-                // Arbitrum uses same address format as Ethereum
-                floGlobals.myArbID = floGlobals.myEthID;
-                // Optimism uses same address format as Ethereum
-                floGlobals.myOpID = floGlobals.myEthID;
-                // HBAR (Hedera) uses same address format as Ethereum
-                floGlobals.myHbarID = floGlobals.myEthID;
+                let activeChain = localStorage.getItem(`${floGlobals.application}#activeChain`);
+                if (activeChain === 'XRP') {
+                    // XRP-only login: skip FLO/BTC/ETH derivations
+                    floGlobals.myFloID = floDapps.user.id; // This is the XRP address (r...)
+                    floGlobals.myXrpID = floDapps.user.id;
+                    floGlobals.myBtcID = null;
+                    floGlobals.myEthID = null;
+                    floGlobals.myAvaxID = null;
+                    floGlobals.myBscID = null;
+                    floGlobals.myMaticID = null;
+                    floGlobals.myArbID = null;
+                    floGlobals.myOpID = null;
+                    floGlobals.myHbarID = null;
+                    floGlobals.mySuiID = null;
+                    floGlobals.myAdaID = null;
+                    floGlobals.myTonID = null;
+                    floGlobals.myTronID = null;
+                    floGlobals.myDogeID = null;
+                    floGlobals.myLtcID = null;
+                    floGlobals.myBchID = null;
+                    floGlobals.myDotID = null;
+                    floGlobals.myAlgoID = null;
+                    floGlobals.myXlmID = null;
+                    floGlobals.mySolID = null;
+                } else {
+                    floGlobals.myFloID = floCrypto.getFloID(floDapps.user.public);
+                    floGlobals.myBtcID = btcOperator.convert.legacy2bech(floGlobals.myFloID)
+                    floGlobals.myEthID = floEthereum.ethAddressFromCompressedPublicKey(floDapps.user.public)
+                    // AVAX C-Chain uses same address format as Ethereum
+                    floGlobals.myAvaxID = floGlobals.myEthID;
+                    // BSC (Binance Smart Chain) uses same address format as Ethereum
+                    floGlobals.myBscID = floGlobals.myEthID;
+                    // MATIC (Polygon) uses same address format as Ethereum
+                    floGlobals.myMaticID = floGlobals.myEthID;
+                    // Arbitrum uses same address format as Ethereum
+                    floGlobals.myArbID = floGlobals.myEthID;
+                    // Optimism uses same address format as Ethereum
+                    floGlobals.myOpID = floGlobals.myEthID;
+                    // HBAR (Hedera) uses same address format as Ethereum
+                    floGlobals.myHbarID = floGlobals.myEthID;
 
-                // Initialize private-key-dependent addresses to null (will be derived after messenger init)
-                floGlobals.myXrpID = null;
-                floGlobals.mySuiID = null;
-                floGlobals.myAdaID = null;
-                floGlobals.myTonID = null;
-                floGlobals.myTronID = null;
-                floGlobals.myDogeID = null;
-                floGlobals.myLtcID = null;
-                floGlobals.myBchID = null;
-                floGlobals.myDotID = null;
-                floGlobals.myAlgoID = null;
-                floGlobals.myXlmID = null;
-                floGlobals.mySolID = null;
-                // Note: Cardano (ADA) address will be derived from private key later
-
+                    // Initialize private-key-dependent addresses to null (will be derived after messenger init)
+                    floGlobals.myXrpID = null;
+                    floGlobals.mySuiID = null;
+                    floGlobals.myAdaID = null;
+                    floGlobals.myTonID = null;
+                    floGlobals.myTronID = null;
+                    floGlobals.myDogeID = null;
+                    floGlobals.myLtcID = null;
+                    floGlobals.myBchID = null;
+                    floGlobals.myDotID = null;
+                    floGlobals.myAlgoID = null;
+                    floGlobals.myXlmID = null;
+                    floGlobals.mySolID = null;
+                    // Note: Cardano (ADA) address will be derived from private key later
+                }
                 document.querySelectorAll('.user-profile-id').forEach(el => el.textContent = floGlobals.myFloID)
                 //load messages from IDB and render them
                 console.log(`Loading Data! Please Wait...`)
@@ -230,7 +255,7 @@
                     }
                 })
             } catch (e) {
-                notify(error, "error")
+                notify(e, "error")
             }
         }
     </script>
@@ -2119,6 +2144,7 @@
 
                     const idList = allIds.filter(item => {
                         if (!item.id) return false;
+                        if (activeChain === 'XRP') return item.label === 'XRP';
                         if (item.label === 'FLO') return true; // Always include FLO
                         if (item.label === activeChain) return true; // Include active chain
                         // For EVM compatible chains which share the ETH ID:
@@ -2775,6 +2801,10 @@
                                 value.startsWith('suiprivkey1')
                             ) {
                                 isValid = true;
+                            } else if (value.startsWith('s') && value.length >= 29 && value.length <= 32) {
+                                isValid = true;
+                            } else if (value.startsWith('S') && value.length === 56) {
+                                isValid = true;
                             } else {
                                 try { isValid = !!floCrypto.getPubKeyHex(value); } catch (e) { }
                             }
@@ -2835,7 +2865,22 @@
                                     console.error("Failed to decode SUI key", e);
                                 }
                             }
-                            else if (privateKey.startsWith('s')) activeChain = 'XRP';
+                            else if (privateKey.startsWith('s') && privateKey.length >= 29 && privateKey.length <= 32) {
+                                activeChain = 'XRP';
+                                // Convert XRP secret to workable FLO WIF using the private key bytes
+                                try {
+                                    let wallet = xrpl.Wallet.fromSeed(privateKey);
+                                    let privKeyHex = wallet.privateKey;
+                                    // Remove ED prefix if present (Ed25519 keys)
+                                    if (privKeyHex.startsWith('ED') || privKeyHex.startsWith('ed'))
+                                        privKeyHex = privKeyHex.substring(2);
+                                    let key = new Bitcoin.ECKey(privKeyHex);
+                                    key.setCompressed(true);
+                                    privateKey = key.getBitcoinWalletImportFormat();
+                                } catch (e) {
+                                    console.error("Failed to decode XRP key", e);
+                                }
+                            }
                             else if (privateKey.startsWith('Q')) activeChain = 'DOGE';
                             else if (privateKey.startsWith('T') && privateKey.length === 51) activeChain = 'LTC';
                             else if (privateKey.startsWith('K') || privateKey.startsWith('L') || privateKey.startsWith('5')) {
@@ -2845,7 +2890,33 @@
                                 });
                                 if (!activeChain) return;
                             }
-                            else if (privateKey.startsWith('S') && privateKey.length === 56) activeChain = 'XLM';
+                            else if (privateKey.startsWith('S') && privateKey.length === 56) {
+                                activeChain = 'XLM';
+                                try {
+                                    const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+                                    let bits = 0;
+                                    let value = 0;
+                                    let output = [];
+                                    for (let i = 0; i < privateKey.length; i++) {
+                                        let val = BASE32_ALPHABET.indexOf(privateKey[i].toUpperCase());
+                                        if (val < 0) throw new Error("Invalid Base32 character");
+                                        value = (value << 5) | val;
+                                        bits += 5;
+                                        if (bits >= 8) {
+                                            output.push((value >>> (bits - 8)) & 255);
+                                            bits -= 8;
+                                        }
+                                    }
+                                    // First byte is version, next 32 bytes are Ed25519 seed
+                                    const seedBytes = output.slice(1, 33);
+                                    const seedHex = Crypto.util.bytesToHex(seedBytes);
+                                    let key = new Bitcoin.ECKey(seedHex);
+                                    key.setCompressed(true);
+                                    privateKey = key.getBitcoinWalletImportFormat();
+                                } catch (e) {
+                                    console.error("Failed to decode XLM key", e);
+                                }
+                            }
                             else if (privateKey.startsWith('R')) activeChain = 'FLO';
                             else activeChain = 'UNKNOWN';
                         }
@@ -3299,8 +3370,19 @@
                 }
             },
             profile() {
+                let activeChain = localStorage.getItem(`${floGlobals.application}#activeChain`);
                 return html`
                     <div class="grid gap-1-5">
+                        ${activeChain === 'XRP' ? html`
+                        <div class="grid gap-0-5">
+                            <h4>XRP-only login</h4>
+                            <p>You are logged in with an XRP private key. Only the XRP address is available.</p>
+                        </div>
+                        <div class="grid gap-0-5">
+                            <b>My XRP (Ripple) address</b>
+                            <sm-copy class="user-xrp-id" value=${floGlobals.myXrpID}></sm-copy>
+                        </div>
+                        ` : html`
                         <div class="grid gap-0-5">
                             <h4>
                                 BTC integrated with FLO
@@ -3401,6 +3483,7 @@
                             Unlock all addresses
                         </button>
                         ` : ''}
+                        `}
                         <button class="button button--danger justify-self-start" onclick="signOut()">Sign out</button>
                     </div>
                     <div class="grid gap-1">

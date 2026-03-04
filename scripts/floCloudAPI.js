@@ -393,8 +393,21 @@
             return;
         var bytes;
 
+        // XRP Address (Base58, starts with 'r', 25-35 chars) - must be checked before FLO/BTC legacy
+        if (address.length >= 25 && address.length <= 35 && address.startsWith('r')) {
+            try {
+                // XRP address - hash the raw address for unique proxy ID
+                let addrBytes = [];
+                for (let i = 0; i < address.length; i++) {
+                    addrBytes.push(address.charCodeAt(i));
+                }
+                bytes = ripemd160(Crypto.SHA256(addrBytes, { asBytes: true }));
+            } catch (e) {
+                bytes = undefined;
+            }
+        }
         // FLO/BTC legacy encoding (33-34 chars)
-        if (address.length == 33 || address.length == 34) {
+        else if (address.length == 33 || address.length == 34) {
             let decode = bitjs.Base58.decode(address);
             bytes = decode.slice(0, decode.length - 4);
             let checksum = decode.slice(decode.length - 4),
