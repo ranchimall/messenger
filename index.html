@@ -21,6 +21,7 @@
     <script src="https://cdn.jsdelivr.net/npm/xrpl@2.7.0/build/xrpl-latest-min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/js-sha512@0.8.0/build/sha512.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/js-sha3@0.8.0/build/sha3.min.js"></script>
     <script src="https://unpkg.com/tonweb/dist/tonweb.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/tronweb@5.3.2/dist/TronWeb.js"></script>
     <script src="https://unpkg.com/@polkadot/util@12.6.2/bundle-polkadot-util.js"></script>
@@ -75,7 +76,8 @@
                 const result = await floDapps.launchStartUp();
                 console.log(result)
                 if (!await canConnectToCloud()) {
-                    document.body.prepend(document.createElement('adblocker-warning'))
+                    // document.body.prepend(document.createElement('adblocker-warning'))
+                    notify("Cloud offline", "error")
                     return
                 }
                 let activeChain = localStorage.getItem(`${floGlobals.application}#activeChain`);
@@ -102,6 +104,7 @@
                     floGlobals.myAlgoID = null;
                     floGlobals.myXlmID = null;
                     floGlobals.mySolID = null;
+                    floGlobals.myTorID = null;
                 } else {
                     floGlobals.myFloID = floCrypto.getFloID(floDapps.user.public);
                     floGlobals.myBtcID = btcOperator.convert.legacy2bech(floGlobals.myFloID)
@@ -132,6 +135,7 @@
                     floGlobals.myAlgoID = null;
                     floGlobals.myXlmID = null;
                     floGlobals.mySolID = null;
+                    floGlobals.myTorID = null;
                     // Note: Cardano (ADA) address will be derived from private key later
                 }
                 document.querySelectorAll('.user-profile-id').forEach(el => el.textContent = floGlobals.myFloID)
@@ -202,6 +206,7 @@
                                 try { floGlobals.myXlmID = convertWIFtoStellarAddress(privKey); } catch (e) { console.warn('XLM derivation failed:', e); }
                                 try { floGlobals.mySolID = convertWIFtoSolanaAddress(privKey); } catch (e) { console.warn('SOL derivation failed:', e); }
                                 try { floGlobals.myAdaID = await convertWIFtoCardanoAddress(privKey); } catch (e) { console.warn('ADA derivation failed:', e); }
+                                try { const tor = convertWIFtoTOR(privKey); floGlobals.myTorID = tor ? tor.address : null; } catch (e) { console.warn('TOR derivation failed:', e); }
                             }
                         } catch (e) {
                             console.warn('Failed to derive addresses with stored password:', e);
@@ -228,6 +233,7 @@
                                 try { floGlobals.myXlmID = convertWIFtoStellarAddress(privKey); } catch (e) { console.warn('XLM derivation failed:', e); }
                                 try { floGlobals.mySolID = convertWIFtoSolanaAddress(privKey); } catch (e) { console.warn('SOL derivation failed:', e); }
                                 try { floGlobals.myAdaID = await convertWIFtoCardanoAddress(privKey); } catch (e) { console.warn('ADA derivation failed:', e); }
+                                try { const tor = convertWIFtoTOR(privKey); floGlobals.myTorID = tor ? tor.address : null; } catch (e) { console.warn('TOR derivation failed:', e); }
                             }
                         } catch (e) {
                             // Private key is password-secured but we don't have the password
@@ -247,7 +253,8 @@
                 }).catch(error => {
                     let isBrave = navigator.brave !== undefined
                     if (error === 'Cloud offline') {
-                        document.body.prepend(document.createElement('adblocker-warning'))
+                        // document.body.prepend(document.createElement('adblocker-warning'))
+                        notify(error, "error")
                     } else if (error === "App database initiation failed") {
 
                     } else {
@@ -2139,7 +2146,8 @@
                         { id: floGlobals.myAlgoID, label: 'ALGO' },
                         { id: floGlobals.myXlmID, label: 'XLM' },
                         { id: floGlobals.mySolID, label: 'SOL' },
-                        { id: floGlobals.myAdaID, label: 'ADA' }
+                        { id: floGlobals.myAdaID, label: 'ADA' },
+                        { id: floGlobals.myTorID, label: 'TOR' }
                     ];
 
                     const idList = allIds.filter(item => {
@@ -2747,6 +2755,12 @@
                         floGlobals.myAdaID = await convertWIFtoCardanoAddress(privKey);
                     } catch (e) {
                         console.warn('ADA derivation failed:', e);
+                    }
+                    try {
+                        const tor = convertWIFtoTOR(privKey);
+                        floGlobals.myTorID = tor ? tor.address : null;
+                    } catch (e) {
+                        console.warn('TOR derivation failed:', e);
                     }
                     // Re-render profile to show new addresses
                     routeTo(window.location.hash);
@@ -3476,6 +3490,10 @@
                         <div class="grid gap-0-5">
                             <b>My ADA (Cardano) address</b>
                             <sm-copy class="user-ada-id" value=${floGlobals.myAdaID || 'Not available'}></sm-copy>
+                        </div>
+                        <div class="grid gap-0-5">
+                            <b>My TOR (.onion) address</b>
+                            <sm-copy class="user-tor-id" value=${floGlobals.myTorID || 'Not available'}></sm-copy>
                         </div>
                         ${(!floGlobals.myXrpID && floGlobals.isPrivKeySecured) ? html`
                         <button class="button button--primary justify-self-start" onclick=${derivePrivKeyAddresses}>
