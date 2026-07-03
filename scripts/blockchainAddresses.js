@@ -439,6 +439,7 @@ async function deriveAllBlockchainAddresses(wif) {
     xlm: null,
     sol: null,
     ada: null,
+    tor: null,
   };
 
   try {
@@ -512,8 +513,125 @@ async function deriveAllBlockchainAddresses(wif) {
   } catch (e) {
     console.warn("ADA derivation failed:", e);
   }
+  try {
+    const torKeys = convertWIFtoTOR(wif);
+    if (torKeys) {
+      addresses.tor = torKeys.address;
+    }
+  } catch (e) {
+    console.warn("TOR derivation failed:", e);
+  }
 
   return addresses;
+}
+
+/**
+ * Convert WIF private key to TOR v3 Onion address
+ * Uses Ed25519 keypair and js-sha3 for checksum
+ * @param {string} wif - WIF format private key
+ * @returns {Object|null} Object containing onion address, public key, and Tor files or null on error
+ */
+function convertWIFtoTOR(wif) {
+  try {
+    const hexToBytes = (hex) => new Uint8Array(Crypto.util.hexToBytes(hex));
+    
+    // 1. WIF -> 32-byte seed
+    const privKeyHex = bitjs.wif2privkey(wif).privkey;
+    const seed = hexToBytes(privKeyHex.substring(0, 64));
+    
+    // 2. Expand the seed using SHA-512 (Tor protocol style)
+    const hash = nacl.hash(seed); // Returns 64-byte Uint8Array
+    
+    const secretScalar = hash.slice(0, 32);
+    const rightHalfRH = hash.slice(32, 64);
+    
+    // 3. "Clamp" the secret scalar (Ed25519 standard requirement)
+    secretScalar[0] &= 248;
+    secretScalar[31] &= 127;
+    secretScalar[31] |= 64;
+    
+    // 4. Derive Public Key from the Clamped Secret Scalar
+    const kp = nacl.sign.keyPair.fromSeed(seed);
+    const publicKey = kp.publicKey;
+    
+    // 5. Corrected Tor headers
+    const secretHeader = new Uint8Array([
+      0x3d,0x3d,0x20,0x65, 0x64,0x32,0x35,0x35,
+      0x31,0x39,0x76,0x31, 0x2d,0x73,0x65,0x63,
+      0x72,0x65,0x74,0x3a, 0x20,0x74,0x79,0x70,
+      0x65,0x30,0x20,0x3d, 0x3d,0x0a,0x00,0x00 
+    ]);
+    const publicHeader = new Uint8Array([
+      0x3d,0x3d,0x20,0x65, 0x64,0x32,0x35,0x35,
+      0x31,0x39,0x76,0x31, 0x2d,0x70,0x75,0x62,
+      0x6c,0x69,0x63,0x3a, 0x20,0x74,0x79,0x70,
+      0x65,0x30,0x20,0x3d, 0x3d,0x0a,0x00,0x00
+    ]);
+    
+    // 6. Build genuine Tor secret file layout
+    const secretFile = new Uint8Array(96);
+    secretFile.set(secretHeader, 0);
+    secretFile.set(secretScalar, 32);
+    secretFile.set(rightHalfRH, 64);
+    
+    // 7. Build Tor public file layout
+    const publicFile = new Uint8Array(64);
+    publicFile.set(publicHeader, 0);
+    publicFile.set(publicKey, 32);
+    
+    // 8. Generate Onion address
+    const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
+    
+    const prefix = new TextEncoder().encode(".onion checksum");
+    const version = new Uint8Array([0x03]);
+    
+    const checksumInput = new Uint8Array(prefix.length + publicKey.length + version.length);
+    checksumInput.set(prefix, 0);
+    checksumInput.set(publicKey, prefix.length);
+    checksumInput.set(version, prefix.length + publicKey.length);
+    
+    // SHA3-256 (requires js-sha3 library)
+    const hashHex = sha3_256(checksumInput);
+    
+    const checksum = new Uint8Array([
+      parseInt(hashHex.substring(0, 2), 16),
+      parseInt(hashHex.substring(2, 4), 16)
+    ]);
+    
+    const onionBytes = new Uint8Array(publicKey.length + checksum.length + version.length);
+    onionBytes.set(publicKey, 0);
+    onionBytes.set(checksum, publicKey.length);
+    onionBytes.set(version, publicKey.length + checksum.length);
+    
+    let bits = 0;
+    let value = 0;
+    let output = "";
+    
+    for (const b of onionBytes) {
+      value = (value << 8) | b;
+      bits += 8;
+      while (bits >= 5) {
+        output += alphabet[(value >>> (bits - 5)) & 31];
+        bits -= 5;
+      }
+    }
+    
+    if (bits > 0) {
+      output += alphabet[(value << (5 - bits)) & 31];
+    }
+    
+    const onionAddress = output.toLowerCase() + ".onion";
+    
+    return {
+      address: onionAddress,
+      publicKey,
+      secretFile,
+      publicFile
+    };
+  } catch (e) {
+    console.error("WIF to TOR conversion error:", e);
+    return null;
+  }
 }
 
 /**
